@@ -21,8 +21,8 @@
         <!-- Cấu hình API & Model -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
-                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Gemini API Key</label>
-                <input type="password" id="apiKey" placeholder="Dán API Key..." 
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Gemini API Key (Đã tự lưu)</label>
+                <input type="password" id="apiKey" placeholder="Dán API Key..." oninput="saveApiKey()"
                     class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500">
             </div>
             <div>
@@ -59,7 +59,7 @@
                 <div class="flex justify-between items-center mb-1">
                     <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Sub Kết Quả</label>
                     <button id="downloadBtn" onclick="downloadResult()" style="display: none;" 
-                        class="text-xs text-emerald-400 hover:text-emerald-300 font-medium">Tải file .srt</button>
+                        class="text-xs text-emerald-400 hover:text-emerald-300 font-medium">Tải file kết quả</button>
                 </div>
                 <textarea id="resultBox" rows="10" readonly placeholder="Kết quả dịch sẽ hiện ở đây..." 
                     class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs font-mono text-slate-300 focus:outline-none"></textarea>
@@ -75,9 +75,31 @@
     </div>
 
     <script>
+        // Biến toàn cục lưu tên file gốc
+        let originalFileName = "translated_sub.srt";
+
+        // Tự động khôi phục API Key khi load trang
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedKey = localStorage.getItem('gemini_api_key');
+            if (savedKey) {
+                document.getElementById('apiKey').value = savedKey;
+            }
+        });
+
+        // Tự động lưu API Key khi người dùng gõ
+        function saveApiKey() {
+            const key = document.getElementById('apiKey').value.trim();
+            localStorage.setItem('gemini_api_key', key);
+        }
+
+        // Xử lý khi upload file
         document.getElementById('subFile').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
+            
+            // Lưu lại tên file gốc
+            originalFileName = file.name;
+
             const reader = new FileReader();
             reader.onload = function(event) {
                 document.getElementById('sourceText').value = event.target.result;
@@ -155,13 +177,17 @@
             }
         }
 
+        // Tải xuống file giữ tên gốc + thêm tiền tố "Vietsub_"
         function downloadResult() {
             const text = document.getElementById('resultBox').value;
             const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'translated_sub.srt';
+            
+            // Thêm chữ "Vietsub_" vào trước tên file gốc
+            a.download = `Vietsub_${originalFileName}`;
+            
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
