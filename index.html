@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Subtitle Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen py-8 px-4">
+    <div class="max-w-4xl mx-auto bg-slate-800 border border-slate-700 shadow-2xl rounded-2xl p-6 md:p-8">
+        
+        <!-- Header -->
+        <div class="mb-6 border-b border-slate-700 pb-4 flex justify-between items-center">
+            <div>
+                <h1 class="text-xl font-bold text-indigo-400">Gemini Subtitle Studio</h1>
+                <p class="text-xs text-slate-400">Chuyên dụng dịch phụ đề .srt / .vtt bằng các mô hình Gemini.</p>
+            </div>
+            <span id="statusText" class="text-xs px-3 py-1 bg-slate-700 text-slate-300 rounded-full">Sẵn sàng</span>
+        </div>
+
+        <!-- Cấu hình API & Model -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Gemini API Key</label>
+                <input type="password" id="apiKey" placeholder="Dán API Key..." 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Chọn Mô hình</label>
+                <select id="modelSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500">
+                    <option value="gemini-4-argon">Gemini 4 Argon (Flagship)</option>
+                    <option value="gemini-3.8-flash" selected>Gemini 3.8 Flash (Khuyên dùng)</option>
+                    <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                    <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- System Prompt -->
+        <div class="mb-4">
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">System Prompt dịch Sub</label>
+            <input type="text" id="customPrompt" value="Bạn là chuyên gia dịch phụ đề. Hãy dịch sang Tiếng Việt tự nhiên, chuẩn văn phong bản ngữ. BẮT BUỘC giữ nguyên định dạng mốc thời gian (00:00:00,000 --> 00:00:00,000) và số thứ tự dòng sub, không giải thích thêm." 
+                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <!-- Upload File & Textarea -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+                <div class="flex justify-between items-center mb-1">
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Sub Gốc (.srt / .vtt)</label>
+                    <input type="file" id="subFile" accept=".srt,.vtt,.txt" class="hidden">
+                    <label for="subFile" class="text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer font-medium">Tải lên file</label>
+                </div>
+                <textarea id="sourceText" rows="10" placeholder="Dán nội dung sub hoặc tải file lên đây..." 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs font-mono focus:outline-none focus:border-indigo-500"></textarea>
+            </div>
+            <div>
+                <div class="flex justify-between items-center mb-1">
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Sub Kết Quả</label>
+                    <button id="downloadBtn" onclick="downloadResult()" style="display: none;" 
+                        class="text-xs text-emerald-400 hover:text-emerald-300 font-medium">Tải file .srt</button>
+                </div>
+                <textarea id="resultBox" rows="10" readonly placeholder="Kết quả dịch sẽ hiện ở đây..." 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs font-mono text-slate-300 focus:outline-none"></textarea>
+            </div>
+        </div>
+
+        <!-- Action Button -->
+        <button onclick="handleTranslate()" id="translateBtn" 
+            class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-lg text-sm transition shadow-lg flex items-center justify-center gap-2">
+            Bắt đầu dịch Sub
+        </button>
+
+    </div>
+
+    <script>
+        document.getElementById('subFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                document.getElementById('sourceText').value = event.target.result;
+            };
+            reader.readAsText(file);
+        });
+
+        function splitSubIntoChunks(text, maxChars = 3500) {
+            let lines = text.split('\n');
+            let chunks = [], currentChunk = '';
+            for (let line of lines) {
+                if ((currentChunk + line + '\n').length > maxChars) {
+                    chunks.push(currentChunk);
+                    currentChunk = line + '\n';
+                } else {
+                    currentChunk += line + '\n';
+                }
+            }
+            if (currentChunk.trim().length > 0) chunks.push(currentChunk);
+            return chunks;
+        }
+
+        async function translateChunk(textChunk, apiKey, model, customPrompt) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+            const body = {
+                contents: [{ parts: [{ text: `${customPrompt}\n\n${textChunk}` }] }]
+            };
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error?.message || 'Lỗi API');
+            return data.candidates[0].content.parts[0].text;
+        }
+
+        async function handleTranslate() {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const model = document.getElementById('modelSelect').value;
+            const customPrompt = document.getElementById('customPrompt').value.trim();
+            const sourceText = document.getElementById('sourceText').value.trim();
+            const resultBox = document.getElementById('resultBox');
+            const statusText = document.getElementById('statusText');
+            const translateBtn = document.getElementById('translateBtn');
+            const downloadBtn = document.getElementById('downloadBtn');
+
+            if (!apiKey) { alert('Vui lòng nhập Gemini API Key!'); return; }
+            if (!sourceText) { alert('Vui lòng nhập hoặc tải file sub lên!'); return; }
+
+            translateBtn.disabled = true;
+            translateBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            downloadBtn.style.display = 'none';
+            resultBox.value = '';
+
+            try {
+                let chunks = splitSubIntoChunks(sourceText);
+                let translatedResults = [];
+
+                for (let i = 0; i < chunks.length; i++) {
+                    statusText.innerText = `Đang dịch (${i + 1}/${chunks.length})...`;
+                    let res = await translateChunk(chunks[i], apiKey, model, customPrompt);
+                    translatedResults.push(res);
+                }
+
+                resultBox.value = translatedResults.join('\n');
+                statusText.innerText = 'Hoàn tất!';
+                downloadBtn.style.display = 'inline-block';
+            } catch (error) {
+                statusText.innerText = 'Lỗi dịch!';
+                resultBox.value = `Lỗi: ${error.message}`;
+            } finally {
+                translateBtn.disabled = false;
+                translateBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        function downloadResult() {
+            const text = document.getElementById('resultBox').value;
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'translated_sub.srt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
